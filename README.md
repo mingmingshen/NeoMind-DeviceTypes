@@ -63,6 +63,73 @@ Each device type is defined in a JSON file under `types/` directory:
 | `Boolean` | true/false |
 | `Array` | List of values |
 
+> Both TitleCase (`"Integer"`) and lowercase (`"integer"`) are accepted on read. NeoMind serializes them as lowercase internally — do not rely on case in downstream logic.
+
+## Commands
+
+A command maps a user action to a downstream JSON payload sent to the device. The renderer is **JSON-aware** (it parses the template, walks the tree, substitutes placeholders, and re-serializes) — not a naive string replacer. Declare what the device expects on the wire, nothing more.
+
+### Command fields
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `name` | string | ✅ | Unique command id (snake_case) |
+| `display_name` | string | ✅ | Label shown in the UI |
+| `description` | string | ❌ | Human-readable description |
+| `payload_template` | string | ✅ | JSON template with `${var}` placeholders |
+| `parameters` | array | ❌ | User-facing inputs (see below) |
+| `fixed_values` | object | ❌ | Constant JSON values merged into every render |
+
+### `payload_template` syntax
+
+- Plain JSON, with `${name}` placeholders substituted at render time.
+- Inside a JSON string: `"${name}"` → substitutes the value, keeps quotes only for string values.
+- Outside a JSON string (bare): `${name}` → substitutes the raw JSON token (numbers/booleans/objects/arrays keep their type).
+- Unknown placeholders are left as-is (rendering does not fail).
+
+```json
+{"cmd": "sleep", "request_id": "${request_id}", "params": {"duration_sec": ${duration_sec}}}
+```
+
+### Three parameter categories — do not mix them up
+
+| Category | Where declared | Who supplies the value | Example |
+|----------|----------------|------------------------|---------|
+| **User-facing** | `parameters` array | End user via UI form | `duration_sec` for sleep |
+| **Fixed constant** | `fixed_values` object | Template author | `enable_ai: true` (always on) |
+| **System-auto** | neither | NeoMind at render time | `request_id` |
+
+### `${request_id}` is auto-injected — never declare it
+
+When a template references `${request_id}` but no value is supplied, NeoMind mints `req-<uuid>` automatically. **Do NOT add `request_id` to `parameters`** — it is not a user input, exposing it only confuses end users.
+
+```json
+// ✅ Correct — request_id invisible to the user
+{
+  "name": "capture",
+  "display_name": "Capture",
+  "payload_template": "{\"cmd\": \"capture\", \"request_id\": \"${request_id}\"}",
+  "parameters": []
+}
+
+// ❌ Wrong — exposes an internal system field to the UI
+{
+  "name": "capture",
+  "parameters": [{"name": "request_id", "display_name": "Request ID", ...}]
+}
+```
+
+### Zero-parameter commands are valid
+
+If a command has no user-tunable inputs, leave `parameters: []` and embed all constants directly in `payload_template`. The NE301 `capture` command is the canonical example — the device protocol is simply `{"cmd": "capture", "request_id": "..."}`.
+
+### Pitfalls to avoid
+
+- **Do not fabricate fields the device protocol does not accept.** Every key in `payload_template` MUST exist in the real wire format. Earlier NE301 templates invented `enable_ai` / `chunk_size` / `store_to_sd` — the device silently ignored them.
+- **Do not hoist system-internal fields into `parameters`.** `request_id`, chunking offsets, and similar orchestration metadata belong to NeoMind, not to the user.
+- **Do not double-brace placeholders.** Use `${name}`, never `${{name}}` or `${{value}}`. The renderer treats doubled braces as literal text.
+- **Do not rely on key ordering.** The renderer re-serializes via `serde_json`; emit/receive code must parse JSON, not pattern-match on byte offsets.
+
 ## File Structure
 
 ```
@@ -110,10 +177,29 @@ No need to update any index file - NeoMind automatically discovers device types 
       "display_name": "Calibrate",
       "payload_template": "{\"action\": \"calibrate\"}",
       "parameters": []
+    },
+    {
+      "name": "set_threshold",
+      "display_name": "Set Threshold",
+      "description": "Configure the alert threshold",
+      "payload_template": "{\"action\": \"set_threshold\", \"request_id\": \"${request_id}\", \"params\": {\"threshold\": ${threshold}}}",
+      "parameters": [
+        {
+          "name": "threshold",
+          "display_name": "Threshold",
+          "data_type": "Float",
+          "unit": "°C",
+          "min": -40,
+          "max": 100,
+          "required": true
+        }
+      ]
     }
   ]
 }
 ```
+
+The `calibrate` command is zero-parameter (constants baked into the template). The `set_threshold` command declares `threshold` as the only user-facing parameter — `request_id` is referenced in the template but **not** declared in `parameters`, since NeoMind auto-injects it.
 
 ## License
 
