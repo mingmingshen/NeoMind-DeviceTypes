@@ -49,6 +49,7 @@ Each device type is defined in a JSON file under `types/` directory:
 | `description` | string | ❌ | Detailed description |
 | `categories` | array | ❌ | Category tags for grouping |
 | `mode` | string | ❌ | `"simple"` or `"full"` (default: `"simple"`) |
+| `store_raw` | boolean | ❌ | If `false`, skip storing the `_raw` metric (full payload snapshot) for this device type. Default `true`. Set `false` for large-payload devices (e.g. cameras) whose structured `metrics` already cover all fields. Requires NeoMind ≥ 0.9.7; ignored by earlier versions. |
 | `metrics` | array | ✅ | Device metrics (data the device provides) |
 | `uplink_samples` | array | ❌ | Sample data for AI understanding |
 | `commands` | array | ❌ | Device commands (actions the device accepts) |
